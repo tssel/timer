@@ -6,6 +6,7 @@
 
 import sys
 import time
+import math
 
 from PyQt6.QtCore import Qt, QTimer, QRectF
 from PyQt6.QtGui import QColor, QPainter, QPen, QIntValidator
@@ -54,7 +55,7 @@ class CircleTimer(QWidget):
         self.ui_timer.timeout.connect(self.update_frame)
         self.ui_timer.start(16)  # ~60fps
 
-        # Shared QLineEdit Stylesheet
+        # Shared QLineEdit Stylesheet (Kept at original 42px)
         input_style = """
             QLineEdit {
                 background: transparent;
@@ -66,9 +67,13 @@ class CircleTimer(QWidget):
             }
         """
 
+        # Recalculated Geometry for 42px Text
+        # Total width = 95 (mins) + 20 (colon) + 95 (secs) = 210
+        # Center of 360 is 180. Start X = 180 - (210 / 2) = 75
+        
         # Minutes Box
         self.mins_edit = QLineEdit(self, placeholderText="00")
-        self.mins_edit.setGeometry(70, 105, 100, 60)
+        self.mins_edit.setGeometry(75, 105, 95, 60)
         self.mins_edit.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.mins_edit.setReadOnly(True)
         self.mins_edit.setStyleSheet(input_style)
@@ -94,7 +99,7 @@ class CircleTimer(QWidget):
 
         # Seconds Box
         self.secs_edit = QLineEdit(self, placeholderText="00")
-        self.secs_edit.setGeometry(190, 105, 100, 60)
+        self.secs_edit.setGeometry(190, 105, 95, 60)
         self.secs_edit.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.secs_edit.setReadOnly(True)
         self.secs_edit.setStyleSheet(input_style)
@@ -109,9 +114,9 @@ class CircleTimer(QWidget):
         # Display initial time values
         self.update_display_text(self.remaining_seconds)
 
-        # play/pause button
+        # play/pause button (Perfect alignment directly under the large text)
         self.button = QPushButton("▶", self)
-        self.button.setGeometry(130, 170, 100, 100)
+        self.button.setGeometry(130, 175, 100, 60)
 
         self.button.setStyleSheet("""
             QPushButton {
@@ -169,11 +174,8 @@ class CircleTimer(QWidget):
                     self.running = False
                     self.button.setText("▶")
                 else:
-                    # Sync integers with remaining ceilings so text rounds cleanly
                     self.remaining_seconds = int(self.display_seconds)
 
-                # Use ceil to prevent text displaying 00 when there's still a fraction of a second left
-                import math
                 self.update_display_text(math.ceil(self.display_seconds))
 
             elif self.mode == "stopwatch":
@@ -181,7 +183,6 @@ class CircleTimer(QWidget):
                 self.update_display_text(int(self.stopwatch_elapsed))
 
         else:
-            # Keep tracking clock time anchor even when paused to avoid huge jumps on resume
             self.last_tick = now
 
         self.update()
@@ -380,6 +381,13 @@ class CircleTimer(QWidget):
 
     def mouseReleaseEvent(self, event):
         self.drag_pos = None
+
+    # ------------------------
+    # Safe Exit Fix
+    # ------------------------
+    def closeEvent(self, event):
+        self.ui_timer.stop()
+        event.accept()
 
 
 if __name__ == "__main__":
