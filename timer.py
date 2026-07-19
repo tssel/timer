@@ -10,13 +10,12 @@ import math
 import os
 
 from PyQt6.QtCore import Qt, QTimer, QRectF, QUrl
-from PyQt6.QtGui import QColor, QPainter, QPen, QIntValidator
+from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (
     QApplication,
     QWidget,
     QPushButton,
     QLineEdit,
-    QLabel,
     QMenu,
     QFileDialog,
 )
@@ -30,7 +29,7 @@ class CircleTimer(QWidget):
         super().__init__()
 
         # Window Size configuration
-        self.window_size = 360  # Initial medium size
+        self.window_size = 360  # Initial default size matching old layout
 
         # Timer state
         self.total_seconds = 25 * 60
@@ -38,6 +37,7 @@ class CircleTimer(QWidget):
 
         self.running = False
         self.editing = False
+        self.input_digits = ""  # Track typed digits during edit mode
         self.mode = "timer"  # timer or stopwatch
         self.stopwatch_elapsed = 0.0
 
@@ -68,23 +68,12 @@ class CircleTimer(QWidget):
         self.ui_timer.timeout.connect(self.update_frame)
         self.ui_timer.start(16)  # ~60fps
 
-        # Initialize Widgets
-        self.mins_edit = QLineEdit(self, placeholderText="00")
-        self.mins_edit.setReadOnly(True)
-        self.mins_edit.setValidator(QIntValidator(0, 99))
-        self.mins_edit.setMaxLength(2)
-        self.mins_edit.mousePressEvent = self.start_editing
-        self.mins_edit.textChanged.connect(self.auto_focus_next)
-        self.mins_edit.returnPressed.connect(self.finish_editing)
-
-        self.colon_label = QLabel(":", self)
-
-        self.secs_edit = QLineEdit(self, placeholderText="00")
-        self.secs_edit.setReadOnly(True)
-        self.secs_edit.setValidator(QIntValidator(0, 59))
-        self.secs_edit.setMaxLength(2)
-        self.secs_edit.mousePressEvent = self.start_editing
-        self.secs_edit.returnPressed.connect(self.finish_editing)
+        # Initialize single QLineEdit
+        self.time_edit = QLineEdit(self)
+        self.time_edit.setReadOnly(True)
+        self.time_edit.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.time_edit.mousePressEvent = self.start_editing
+        self.time_edit.installEventFilter(self) # Catch keyboard entries natively
 
         self.button = QPushButton("▶", self)
         self.button.clicked.connect(self.toggle_timer)
@@ -92,9 +81,6 @@ class CircleTimer(QWidget):
 
         # Apply layout geometry and font scaling mapping
         self.update_layout_geometry()
-
-        # Monitor focus changes to detect clicking outside the entire timer block
-        QApplication.instance().focusChanged.connect(self.handle_focus_change)
 
         # Display initial time values
         self.update_display_text(self.remaining_seconds)
@@ -107,27 +93,26 @@ class CircleTimer(QWidget):
         self.drag_pos = None
 
     def update_layout_geometry(self):
-        """Calculates widget layouts and dynamic font sizing centered on window size"""
+        """Calculates widget layouts and dynamic fonts using the old code baseline layout"""
         self.setFixedSize(self.window_size, self.window_size)
-        center = self.window_size // 2
+        
+        # Proportional scale factor relative to standard size 360
+        scale = self.window_size / 360.0
 
-        # Scale down fonts on the small window setting
-        if self.window_size == 280:
-            font_size = 32
-            span_half_width = 80
-            input_w = 75
-            colon_w = 10
-            text_y_offset = 60
-            btn_y_offset = 0
-        else:
-            font_size = 42
-            span_half_width = 105
-            input_w = 95
-            colon_w = 20
-            text_y_offset = 75
-            btn_y_offset = 5
+        # Exact layout positions extracted and scaled from old code:
+        # Old time_edit: X=70, Y=105, W=220, H=60 | font = 42px
+        # Old button: X=130, Y=170, W=100, H=100 | font = 42px
+        tx = int(70 * scale)
+        ty = int(105 * scale)
+        tw = int(220 * scale)
+        th = int(60 * scale)
+        font_size = int(42 * scale)
 
-        # Build dynamic sheets
+        bx = int(130 * scale)
+        by = int(170 * scale)
+        bw = int(100 * scale)
+        bh = int(100 * scale)
+
         input_style = f"""
             QLineEdit {{
                 background: transparent;
@@ -135,15 +120,6 @@ class CircleTimer(QWidget):
                 color: white;
                 font-size: {font_size}px;
                 font-weight: 600;
-                padding: 0px;
-            }}
-        """
-        label_style = f"""
-            QLabel {{
-                color: white;
-                font-size: {font_size}px;
-                font-weight: 600;
-                background: transparent;
                 padding: 0px;
             }}
         """
@@ -159,27 +135,13 @@ class CircleTimer(QWidget):
             }}
         """
 
-        self.mins_edit.setStyleSheet(input_style)
-        self.secs_edit.setStyleSheet(input_style)
-        self.colon_label.setStyleSheet(label_style)
+        self.time_edit.setStyleSheet(input_style)
         self.button.setStyleSheet(btn_style)
 
-        # Horizontal coordinates using dynamic component widths
-        start_x = center - span_half_width
-        text_y = center - text_y_offset
-        btn_y = center - btn_y_offset
+        self.time_edit.setGeometry(tx, ty, tw, th)
+        self.time_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Apply spatial coordinates
-        self.mins_edit.setGeometry(start_x, text_y, input_w, 60)
-        self.mins_edit.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-
-        self.colon_label.setGeometry(start_x + input_w, text_y - 4, colon_w, 60)
-        self.colon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.secs_edit.setGeometry(start_x + input_w + colon_w, text_y, input_w, 60)
-        self.secs_edit.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-
-        self.button.setGeometry(center - 50, btn_y, 100, 60)
+        self.button.setGeometry(bx, by, bw, bh)
         self.update()
 
     # ------------------------
@@ -187,12 +149,17 @@ class CircleTimer(QWidget):
     # ------------------------
 
     def toggle_timer(self):
-        if self.editing:
-            return
-        # Stop sound playback if button clicked while ringing
         if self.sound_effect.isPlaying():
             self.sound_effect.stop()
             self.button.setText("▶")
+            return
+
+        if self.editing:
+            self.finish_editing()
+            if self.total_seconds > 0 and self.mode == "timer":
+                self.running = True
+                self.button.setText("⏸")
+                self.last_tick = time.time()
             return
 
         self.running = not self.running
@@ -200,7 +167,6 @@ class CircleTimer(QWidget):
         self.last_tick = time.time()
 
     def play_alarm(self):
-        """Triggers alarm logic handling mute, custom tracks, and default track fallbacks."""
         if self.sound_state == "muted":
             return
 
@@ -214,7 +180,6 @@ class CircleTimer(QWidget):
             self.sound_effect.setSource(QUrl.fromLocalFile(active_track))
             self.sound_effect.play()
         else:
-            # Final hardware/OS fallback if track doesn't exist
             QApplication.beep()
 
     # ------------------------
@@ -224,7 +189,6 @@ class CircleTimer(QWidget):
     def update_frame(self):
         now = time.time()
         
-        # Override standard button text if the alarm is currently ringing
         if self.sound_effect.isPlaying():
             self.button.setText("✓")
         elif not self.editing:
@@ -254,7 +218,7 @@ class CircleTimer(QWidget):
         self.update()
 
     # ------------------------
-    # Editing
+    # Custom Centered Digit Entry Logic
     # ------------------------
 
     def start_editing(self, event):
@@ -263,43 +227,66 @@ class CircleTimer(QWidget):
         self.editing = True
         self.running = False
         self.button.setText("▶")
-        self.mins_edit.setText("")
-        self.secs_edit.setText("")
-        self.mins_edit.setReadOnly(False)
-        self.secs_edit.setReadOnly(False)
-        self.mins_edit.setFocus()
+        self.input_digits = ""
+        self.time_edit.setReadOnly(False)
+        self.render_edit_display()
 
-    def auto_focus_next(self, text):
-        if len(text) == 2 and self.editing:
-            self.secs_edit.setFocus()
+    def eventFilter(self, obj, event):
+        if obj == self.time_edit and self.editing and event.type() == event.Type.KeyPress:
+            key = event.key()
 
-    def handle_focus_change(self, old_widget, new_widget):
-        if not self.editing:
-            return
-        if new_widget not in (self.mins_edit, self.secs_edit):
-            self.finish_editing()
+            if Qt.Key.Key_0 <= key <= Qt.Key.Key_9:
+                if len(self.input_digits) < 6:
+                    self.input_digits += chr(key)
+                    self.render_edit_display()
+                return True
+
+            elif key == Qt.Key.Key_Backspace:
+                if len(self.input_digits) > 0:
+                    self.input_digits = self.input_digits[:-1]
+                    self.render_edit_display()
+                return True
+
+            elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self.finish_editing()
+                return True
+
+            elif key == Qt.Key.Key_Escape:
+                self.editing = False
+                self.time_edit.setReadOnly(True)
+                current_val = self.remaining_seconds if self.mode == "timer" else int(self.stopwatch_elapsed)
+                self.update_display_text(current_val)
+                return True
+
+        return super().eventFilter(obj, event)
+
+    def render_edit_display(self):
+        """Pads and constructs standard 00:00:00 view centered accurately"""
+        padded = self.input_digits.zfill(6)
+        formatted = f"{padded[0:2]}:{padded[2:4]}:{padded[4:6]}"
+        
+        self.time_edit.setText(formatted)
+        self.time_edit.setCursorPosition(len(formatted))
 
     def finish_editing(self):
         if not self.editing:
             return
-        try:
-            m = int(self.mins_edit.text()) if self.mins_edit.text() else 0
-            s = int(self.secs_edit.text()) if self.secs_edit.text() else 0
-            if s > 59:
-                s = 59
-            total = m * 60 + s
+            
+        self.editing = False
+        self.time_edit.setReadOnly(True)
+        self.time_edit.clearFocus()
+
+        if self.input_digits:
+            padded = self.input_digits.zfill(6)
+            h = int(padded[0:2])
+            m = int(padded[2:4])
+            s = int(padded[4:6])
+            
+            total = h * 3600 + m * 60 + s
             if total > 0 and self.mode == "timer":
                 self.total_seconds = total
                 self.remaining_seconds = total
                 self.display_seconds = float(total)
-        except Exception:
-            pass
-
-        self.editing = False
-        self.mins_edit.setReadOnly(True)
-        self.secs_edit.setReadOnly(True)
-        self.mins_edit.clearFocus()
-        self.secs_edit.clearFocus()
 
         current_val = self.remaining_seconds if self.mode == "timer" else int(self.stopwatch_elapsed)
         self.update_display_text(current_val)
@@ -310,26 +297,20 @@ class CircleTimer(QWidget):
 
     def show_context_menu(self, pos):
         menu = QMenu(self)
-
         timer_action = menu.addAction("Timer")
         stopwatch_action = menu.addAction("Stopwatch")
         
-        # Audio Configuration Submenu
         menu.addSeparator()
         sound_menu = menu.addMenu("Sound Options")
-        
         mute_action = sound_menu.addAction("Muted")
         mute_action.setCheckable(True)
         mute_action.setChecked(self.sound_state == "muted")
-
         default_action = sound_menu.addAction("Default Tone")
         default_action.setCheckable(True)
         default_action.setChecked(self.sound_state == "default_tone")
-        
         sound_menu.addSeparator()
         custom_sound_file_action = sound_menu.addAction("Choose Custom Sound File (.wav)...")
         
-        # Resize Submenu
         menu.addSeparator()
         resize_menu = menu.addMenu("Resize Window")
         small_action = resize_menu.addAction("Small (280x280)")
@@ -366,13 +347,7 @@ class CircleTimer(QWidget):
             self.close()
 
     def select_custom_sound(self):
-        """Opens file selection dialog explicitly filtered only for .wav formats"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, 
-            "Select Alarm Sound", 
-            "", 
-            "Audio Files (*.wav)"
-        )
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select Alarm Sound", "", "Audio Files (*.wav)")
         if file_path:
             self.custom_wav_path = file_path
 
@@ -402,20 +377,17 @@ class CircleTimer(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # background circle
         painter.setBrush(QColor(28, 28, 28, 235))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(10, 10, self.window_size - 20, self.window_size - 20)
 
         rect = QRectF(20, 20, self.window_size - 40, self.window_size - 40)
 
-        # background ring
         bg_pen = QPen(QColor(65, 65, 65), 14)
         bg_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(bg_pen)
         painter.drawArc(rect, 0, 360 * 16)
 
-        # only draw ring in timer mode
         if self.mode == "timer":
             progress = max(0.0, min(1.0, self.display_seconds / self.total_seconds))
             progress_pen = QPen(QColor(GREEN), 14)
@@ -427,15 +399,24 @@ class CircleTimer(QWidget):
             painter.drawArc(rect, start_angle, span_angle)
 
     # ------------------------
-    # Utils
+    # Dynamic Trimming Logic
     # ------------------------
 
     def update_display_text(self, seconds):
+        """Converts raw seconds into a cleanly formatted string without unneeded zeros"""
         if not self.editing:
-            m = seconds // 60
+            h = seconds // 3600
+            m = (seconds % 3600) // 60
             s = seconds % 60
-            self.mins_edit.setText(f"{m:02}")
-            self.secs_edit.setText(f"{s:02}")
+            
+            if h > 0:
+                display_str = f"{h}:{m:02}:{s:02}"
+            elif m > 0:
+                display_str = f"{m}:{s:02}"
+            else:
+                display_str = f"{s}"
+                
+            self.time_edit.setText(display_str)
 
     # ------------------------
     # Dragging
@@ -454,9 +435,6 @@ class CircleTimer(QWidget):
     def mouseReleaseEvent(self, event):
         self.drag_pos = None
 
-    # ------------------------
-    # Safe Exit Fix
-    # ------------------------
     def closeEvent(self, event):
         self.ui_timer.stop()
         if self.sound_effect.isPlaying():
