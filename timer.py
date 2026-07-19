@@ -8,15 +8,15 @@ import sys
 import time
 
 from PyQt6.QtCore import Qt, QTimer, QRectF
-from PyQt6.QtGui import QColor, QPainter, QPen
+from PyQt6.QtGui import QColor, QPainter, QPen, QIntValidator
 from PyQt6.QtWidgets import (
     QApplication,
     QWidget,
     QPushButton,
     QLineEdit,
+    QLabel,
     QMenu,
 )
-
 
 WINDOW_SIZE = 360
 GREEN = "#26ba35"
@@ -49,34 +49,65 @@ class CircleTimer(QWidget):
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        # high frequency UI update (smooth animation)
+        # high frequency UI update (smooth animation & precise time tracking)
         self.ui_timer = QTimer()
         self.ui_timer.timeout.connect(self.update_frame)
         self.ui_timer.start(16)  # ~60fps
 
-        # real second timer (keeps accuracy)
-        self.sec_timer = QTimer()
-        self.sec_timer.timeout.connect(self.tick_second)
-        self.sec_timer.start(1000)
-
-        # time display
-        self.time_edit = QLineEdit(self.format_time(self.remaining_seconds), self)
-        self.time_edit.setGeometry(70, 105, 220, 60)
-        self.time_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.time_edit.setReadOnly(True)
-
-        self.time_edit.setStyleSheet("""
+        # Shared QLineEdit Stylesheet
+        input_style = """
             QLineEdit {
                 background: transparent;
                 border: none;
                 color: white;
                 font-size: 42px;
                 font-weight: 600;
+                padding: 0px;
+            }
+        """
+
+        # Minutes Box
+        self.mins_edit = QLineEdit(self, placeholderText="00")
+        self.mins_edit.setGeometry(70, 105, 100, 60)
+        self.mins_edit.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.mins_edit.setReadOnly(True)
+        self.mins_edit.setStyleSheet(input_style)
+        self.mins_edit.setValidator(QIntValidator(0, 99))
+        self.mins_edit.setMaxLength(2)
+        self.mins_edit.mousePressEvent = self.start_editing
+        self.mins_edit.textChanged.connect(self.auto_focus_next)
+        self.mins_edit.returnPressed.connect(self.finish_editing)
+
+        # Fixed Colon Label
+        self.colon_label = QLabel(":", self)
+        self.colon_label.setGeometry(170, 101, 20, 60)
+        self.colon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.colon_label.setStyleSheet("""
+            QLabel {
+                color: white;
+                font-size: 42px;
+                font-weight: 600;
+                background: transparent;
+                padding: 0px;
             }
         """)
 
-        self.time_edit.mousePressEvent = self.start_editing
-        self.time_edit.returnPressed.connect(self.finish_editing)
+        # Seconds Box
+        self.secs_edit = QLineEdit(self, placeholderText="00")
+        self.secs_edit.setGeometry(190, 105, 100, 60)
+        self.secs_edit.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.secs_edit.setReadOnly(True)
+        self.secs_edit.setStyleSheet(input_style)
+        self.secs_edit.setValidator(QIntValidator(0, 59))
+        self.secs_edit.setMaxLength(2)
+        self.secs_edit.mousePressEvent = self.start_editing
+        self.secs_edit.returnPressed.connect(self.finish_editing)
+
+        # Monitor focus changes to detect clicking outside the entire timer block
+        QApplication.instance().focusChanged.connect(self.handle_focus_change)
+
+        # Display initial time values
+        self.update_display_text(self.remaining_seconds)
 
         # play/pause button
         self.button = QPushButton("▶", self)
@@ -118,20 +149,6 @@ class CircleTimer(QWidget):
 
         self.last_tick = time.time()
 
-    def tick_second(self):
-        if not self.running or self.editing:
-            return
-
-        if self.mode == "timer":
-            if self.remaining_seconds > 0:
-                self.remaining_seconds -= 1
-
-            if self.remaining_seconds <= 0:
-                self.remaining_seconds = 0
-                self.display_seconds = 0
-                self.running = False
-                self.button.setText("▶")
-
     # ------------------------
     # Smooth animation frame
     # ------------------------
@@ -151,17 +168,21 @@ class CircleTimer(QWidget):
                     self.remaining_seconds = 0
                     self.running = False
                     self.button.setText("▶")
+                else:
+                    # Sync integers with remaining ceilings so text rounds cleanly
+                    self.remaining_seconds = int(self.display_seconds)
 
-                self.time_edit.setText(
-                    self.format_time(int(self.display_seconds))
-                )
+                # Use ceil to prevent text displaying 00 when there's still a fraction of a second left
+                import math
+                self.update_display_text(math.ceil(self.display_seconds))
 
             elif self.mode == "stopwatch":
                 self.stopwatch_elapsed += delta
+                self.update_display_text(int(self.stopwatch_elapsed))
 
-                self.time_edit.setText(
-                    self.format_time(int(self.stopwatch_elapsed))
-                )
+        else:
+            # Keep tracking clock time anchor even when paused to avoid huge jumps on resume
+            self.last_tick = now
 
         self.update()
 
@@ -177,31 +198,56 @@ class CircleTimer(QWidget):
         self.running = False
         self.button.setText("▶")
 
-        self.time_edit.setReadOnly(False)
-        self.time_edit.setFocus()
-        self.time_edit.selectAll()
+        self.mins_edit.setText("")
+        self.secs_edit.setText("")
+        
+        self.mins_edit.setReadOnly(False)
+        self.secs_edit.setReadOnly(False)
+        
+        self.mins_edit.setFocus()
+
+    def auto_focus_next(self, text):
+        if len(text) == 2 and self.editing:
+            self.secs_edit.setFocus()
+
+    def handle_focus_change(self, old_widget, new_widget):
+        if not self.editing:
+            return
+        
+        if new_widget not in (self.mins_edit, self.secs_edit):
+            self.finish_editing()
 
     def finish_editing(self):
-        text = self.time_edit.text().strip()
+        if not self.editing:
+            return
 
         try:
-            m, s = text.split(":")
-            total = int(m) * 60 + int(s)
+            m = int(self.mins_edit.text()) if self.mins_edit.text() else 0
+            s = int(self.secs_edit.text()) if self.secs_edit.text() else 0
+            
+            if s > 59:
+                s = 59
+
+            total = m * 60 + s
 
             if total > 0 and self.mode == "timer":
                 self.total_seconds = total
                 self.remaining_seconds = total
                 self.display_seconds = float(total)
-
-        except:
+        except Exception:
             pass
 
-        self.time_edit.setText(
-            self.format_time(self.remaining_seconds)
-        )
-
-        self.time_edit.setReadOnly(True)
         self.editing = False
+        
+        self.mins_edit.setReadOnly(True)
+        self.secs_edit.setReadOnly(True)
+        
+        self.mins_edit.clearFocus()
+        self.secs_edit.clearFocus()
+
+        current_val = self.remaining_seconds if self.mode == "timer" else int(self.stopwatch_elapsed)
+        self.update_display_text(current_val)
+
     # ------------------------
     # Context menu
     # ------------------------
@@ -211,14 +257,17 @@ class CircleTimer(QWidget):
 
         timer_action = menu.addAction("Timer")
         stopwatch_action = menu.addAction("Stopwatch")
+        menu.addSeparator()
+        exit_action = menu.addAction("Exit")
 
         action = menu.exec(self.mapToGlobal(pos))
 
         if action == timer_action:
             self.switch_to_timer()
-
         elif action == stopwatch_action:
             self.switch_to_stopwatch()
+        elif action == exit_action:
+            self.close()
 
     def switch_to_timer(self):
         self.mode = "timer"
@@ -230,10 +279,7 @@ class CircleTimer(QWidget):
         self.remaining_seconds = self.total_seconds
         self.display_seconds = float(self.total_seconds)
 
-        self.time_edit.setText(
-            self.format_time(self.remaining_seconds)
-        )
-
+        self.update_display_text(self.remaining_seconds)
         self.update()
 
     def switch_to_stopwatch(self):
@@ -243,9 +289,7 @@ class CircleTimer(QWidget):
         self.button.setText("▶")
 
         self.stopwatch_elapsed = 0
-
-        self.time_edit.setText("00:00")
-
+        self.update_display_text(0)
         self.update()
 
     # ------------------------
@@ -313,10 +357,12 @@ class CircleTimer(QWidget):
     # Utils
     # ------------------------
 
-    def format_time(self, seconds):
-        m = seconds // 60
-        s = seconds % 60
-        return f"{m:02}:{s:02}"
+    def update_display_text(self, seconds):
+        if not self.editing:
+            m = seconds // 60
+            s = seconds % 60
+            self.mins_edit.setText(f"{m:02}")
+            self.secs_edit.setText(f"{s:02}")
 
     # ------------------------
     # Dragging
@@ -336,7 +382,8 @@ class CircleTimer(QWidget):
         self.drag_pos = None
 
 
-app = QApplication(sys.argv)
-window = CircleTimer()
-window.show()
-sys.exit(app.exec())
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = CircleTimer()
+    window.show()
+    sys.exit(app.exec())
