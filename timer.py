@@ -9,7 +9,7 @@ import time
 import math
 import os
 
-from PyQt6.QtCore import Qt, QTimer, QRectF, QUrl
+from PyQt6.QtCore import Qt, QTimer, QRectF, QUrl, QEvent
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (
     QApplication,
@@ -72,8 +72,7 @@ class CircleTimer(QWidget):
         self.time_edit = QLineEdit(self)
         self.time_edit.setReadOnly(True)
         self.time_edit.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
-        self.time_edit.mousePressEvent = self.start_editing
-        self.time_edit.installEventFilter(self) # Catch keyboard entries natively
+        self.time_edit.installEventFilter(self) # Catch keyboard and click entries natively
 
         self.button = QPushButton("▶", self)
         self.button.clicked.connect(self.toggle_timer)
@@ -99,9 +98,6 @@ class CircleTimer(QWidget):
         # Proportional scale factor relative to standard size 360
         scale = self.window_size / 360.0
 
-        # Exact layout positions extracted and scaled from old code:
-        # Old time_edit: X=70, Y=105, W=220, H=60 | font = 42px
-        # Old button: X=130, Y=170, W=100, H=100 | font = 42px
         tx = int(70 * scale)
         ty = int(105 * scale)
         tw = int(220 * scale)
@@ -232,30 +228,44 @@ class CircleTimer(QWidget):
         self.render_edit_display()
 
     def eventFilter(self, obj, event):
-        if obj == self.time_edit and self.editing and event.type() == event.Type.KeyPress:
-            key = event.key()
-
-            if Qt.Key.Key_0 <= key <= Qt.Key.Key_9:
-                if len(self.input_digits) < 6:
-                    self.input_digits += chr(key)
-                    self.render_edit_display()
+        if obj == self.time_edit:
+            # Native click filtering handling replacement
+            if event.type() == QEvent.Type.MouseButtonPress:
+                self.start_editing(event)
                 return True
 
-            elif key == Qt.Key.Key_Backspace:
-                if len(self.input_digits) > 0:
-                    self.input_digits = self.input_digits[:-1]
-                    self.render_edit_display()
-                return True
+            # Keystroke intercept pipeline
+            if self.editing and event.type() == QEvent.Type.KeyPress:
+                key = event.key()
+                # Safely extract the integer value whether 'key' is an int or an Enum member
+                key_val = key.value if hasattr(key, 'value') else key
 
-            elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                self.finish_editing()
-                return True
+                # Compare via explicit integer values to prevent cross-type crashes
+                if Qt.Key.Key_0.value <= key_val <= Qt.Key.Key_9.value:
+                    if len(self.input_digits) < 6:
+                        self.input_digits += event.text()
+                        self.render_edit_display()
+                    return True
 
-            elif key == Qt.Key.Key_Escape:
-                self.editing = False
-                self.time_edit.setReadOnly(True)
-                current_val = self.remaining_seconds if self.mode == "timer" else int(self.stopwatch_elapsed)
-                self.update_display_text(current_val)
+                elif key_val == Qt.Key.Key_Backspace.value:
+                    if len(self.input_digits) > 0:
+                        self.input_digits = self.input_digits[:-1]
+                        self.render_edit_display()
+                    return True
+
+                elif key_val in (Qt.Key.Key_Return.value, Qt.Key.Key_Enter.value):
+                    self.finish_editing()
+                    return True
+
+                elif key_val == Qt.Key.Key_Escape.value:
+                    self.editing = False
+                    self.time_edit.setReadOnly(True)
+                    self.time_edit.clearFocus()
+                    current_val = self.remaining_seconds if self.mode == "timer" else int(self.stopwatch_elapsed)
+                    self.update_display_text(current_val)
+                    return True
+
+                # Swallow arbitrary text adjustments to protect the layout structure
                 return True
 
         return super().eventFilter(obj, event)
@@ -374,29 +384,30 @@ class CircleTimer(QWidget):
     # ------------------------
 
     def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Context manager protects painter life cycle pipelines
+        with QPainter(self) as painter:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        painter.setBrush(QColor(28, 28, 28, 235))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(10, 10, self.window_size - 20, self.window_size - 20)
+            painter.setBrush(QColor(28, 28, 28, 235))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(10, 10, self.window_size - 20, self.window_size - 20)
 
-        rect = QRectF(20, 20, self.window_size - 40, self.window_size - 40)
+            rect = QRectF(20, 20, self.window_size - 40, self.window_size - 40)
 
-        bg_pen = QPen(QColor(65, 65, 65), 14)
-        bg_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(bg_pen)
-        painter.drawArc(rect, 0, 360 * 16)
+            bg_pen = QPen(QColor(65, 65, 65), 14)
+            bg_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(bg_pen)
+            painter.drawArc(rect, 0, 360 * 16)
 
-        if self.mode == "timer":
-            progress = max(0.0, min(1.0, self.display_seconds / self.total_seconds))
-            progress_pen = QPen(QColor(GREEN), 14)
-            progress_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            painter.setPen(progress_pen)
+            if self.mode == "timer":
+                progress = max(0.0, min(1.0, self.display_seconds / self.total_seconds))
+                progress_pen = QPen(QColor(GREEN), 14)
+                progress_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                painter.setPen(progress_pen)
 
-            start_angle = 90 * 16
-            span_angle = 0 if progress <= 0 else round(-5760 * progress)
-            painter.drawArc(rect, start_angle, span_angle)
+                start_angle = 90 * 16
+                span_angle = 0 if progress <= 0 else round(-5760 * progress)
+                painter.drawArc(rect, start_angle, span_angle)
 
     # ------------------------
     # Dynamic Trimming Logic
