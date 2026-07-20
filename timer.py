@@ -41,6 +41,9 @@ class CircleTimer(QWidget):
         self.mode = "timer"  # timer or stopwatch
         self.stopwatch_elapsed = 0.0
 
+        # Appearance State ("dark" or "light")
+        self.theme = "dark"
+
         # Audio setup using native QSoundEffect
         self.sound_effect = QSoundEffect(self)
         self.sound_effect.setLoopCount(3) 
@@ -109,11 +112,19 @@ class CircleTimer(QWidget):
         bw = int(100 * scale)
         bh = int(100 * scale)
 
+        # Theme-dependent stylesheet properties
+        if self.theme == "dark":
+            text_color = "white"
+            hover_color = "rgb(220,220,220)"
+        else:
+            text_color = "#2b2b2b"  # Muted charcoal dark grey instead of stark pure black
+            hover_color = "rgb(110,110,110)"
+
         input_style = f"""
             QLineEdit {{
                 background: transparent;
                 border: none;
-                color: white;
+                color: {text_color};
                 font-size: {font_size}px;
                 font-weight: 600;
                 padding: 0px;
@@ -123,11 +134,11 @@ class CircleTimer(QWidget):
             QPushButton {{
                 background: transparent;
                 border: none;
-                color: white;
+                color: {text_color};
                 font-size: {font_size}px;
             }}
             QPushButton:hover {{
-                color: rgb(220,220,220);
+                color: {hover_color};
             }}
         """
 
@@ -311,6 +322,17 @@ class CircleTimer(QWidget):
         stopwatch_action = menu.addAction("Stopwatch")
         
         menu.addSeparator()
+        # Appearance Submenu
+        appearance_menu = menu.addMenu("Appearance")
+        dark_action = appearance_menu.addAction("Dark Mode")
+        dark_action.setCheckable(True)
+        dark_action.setChecked(self.theme == "dark")
+        
+        light_action = appearance_menu.addAction("Light Mode")
+        light_action.setCheckable(True)
+        light_action.setChecked(self.theme == "light")
+
+        menu.addSeparator()
         sound_menu = menu.addMenu("Sound Options")
         mute_action = sound_menu.addAction("Muted")
         mute_action.setCheckable(True)
@@ -336,6 +358,12 @@ class CircleTimer(QWidget):
             self.switch_to_timer()
         elif action == stopwatch_action:
             self.switch_to_stopwatch()
+        elif action == dark_action:
+            self.theme = "dark"
+            self.update_layout_geometry()
+        elif action == light_action:
+            self.theme = "light"
+            self.update_layout_geometry()
         elif action == mute_action:
             self.sound_state = "muted"
         elif action == default_action:
@@ -384,17 +412,24 @@ class CircleTimer(QWidget):
     # ------------------------
 
     def paintEvent(self, event):
-        # Context manager protects painter life cycle pipelines
         with QPainter(self) as painter:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-            painter.setBrush(QColor(28, 28, 28, 235))
+            # Assign colors contextually depending on active theme
+            if self.theme == "dark":
+                bg_color = QColor(28, 28, 28, 235)
+                ring_bg_color = QColor(65, 65, 65)
+            else:
+                bg_color = QColor(244, 244, 242, 245)  # Softer warm off-white, less bright
+                ring_bg_color = QColor(215, 215, 210)
+
+            painter.setBrush(bg_color)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawEllipse(10, 10, self.window_size - 20, self.window_size - 20)
 
             rect = QRectF(20, 20, self.window_size - 40, self.window_size - 40)
 
-            bg_pen = QPen(QColor(65, 65, 65), 14)
+            bg_pen = QPen(ring_bg_color, 14)
             bg_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             painter.setPen(bg_pen)
             painter.drawArc(rect, 0, 360 * 16)
