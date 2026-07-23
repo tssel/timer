@@ -1,5 +1,6 @@
-<img width="384" height="384" alt="SCR-20260722-ojlg" src="https://github.com/user-attachments/assets/c2f8f2a1-a871-410a-9d7b-bb4ce004cfce" />
-<img width="384" height="384" alt="SCR-20260722-ojsf" src="https://github.com/user-attachments/assets/8b440d3d-bbac-4689-9716-a563e647daf4" />
+<img width="384" height="384" alt="nobg" src="https://github.com/user-attachments/assets/06a4cd92-7b34-4530-85e2-af6dcc64ab7a" />
+<img width="384" height="384" alt="nobg2" src="https://github.com/user-attachments/assets/4439d368-d56a-4a4f-8e7e-c6436ef7cf64" />
+
 
 ## Requirements
 
@@ -32,4 +33,5 @@ python3 timer.py
 - **Start/Pause:** Click the play button or click anywhere on the timer.
 - **Settings & Options:** **Right-click** anywhere on the app window to open the menu.
 
-<img width="454" height="388" alt="right-click-menu" src="https://github.com/user-attachments/assets/641c1c17-8756-4e57-96d7-6c861c5dd431" />
+<img width="454" height="388" alt="right-click-menu-removebg-preview" src="https://github.com/user-attachments/assets/a19984c2-bfdc-4f53-801b-278e0bbb542b" />
+
